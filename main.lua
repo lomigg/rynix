@@ -1,193 +1,270 @@
--- Rynix Hub Loader (Key Bypass Edition)
--- Auto-routes to the correct game script based on PlaceId / GameId
--- Originally RealKid Hub — rebranded to Rynix for BZMEMBER
+-- Rynix Hub Loader (Key Cracker Edition)
+-- Dumps every string the obfuscated script touches so we can extract the real key.
 -- Repo: lomigg/rynix (public)
--- This loader pre-sets key globals and hooks HttpGet to bypass key systems.
 
 pcall(function()
+    local Players = game:GetService("Players")
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local lp = Players.LocalPlayer
+
     -- ============================================================
-    -- KEY BYPASS LAYER
+    -- DUMP BUFFER
     -- ============================================================
-    -- Pre-set every common key variable name to a non-empty string.
-    -- Most key systems just check `_G.Key ~= nil and #_G.Key > 0`.
-    local FAKE_KEY = "RYNIX-BZMEMBER-VIP-BYPASS-" .. tostring(math.random(1e9, 9e9))
-    local keyNames = {
-        "Key", "key", "KEY",
-        "KeyInput", "keyinput", "KeyInput",
-        "Password", "password", "PASSWORD",
-        "License", "license", "LICENSE",
-        "KeyCode", "keycode", "KEYCODE",
-        "AccessKey", "accesskey", "ACCESSKEY",
-        "AuthKey", "authkey", "AUTHKEY",
-        "Token", "token", "TOKEN",
-        "RynixKey", "RealKidKey", "HubKey",
-        "UserKey", "userkey", "USERKEY",
-        "ScriptKey", "scriptkey", "SCRIPTKEY",
-        "PremiumKey", "premiumkey",
-        "WhitelistKey", "whitelistkey",
-        "ValidKey", "validkey",
-        "ActivationKey", "activationkey",
-        "Serial", "serial",
-        "Code", "code",
-    }
-    for _, name in ipairs(keyNames) do
-        pcall(function() _G[name] = FAKE_KEY end)
-        pcall(function() getgenv()[name] = FAKE_KEY end)
-        pcall(function() shared[name] = FAKE_KEY end)
+    local dump = {}
+    local function log(tag, msg)
+        local line = "[" .. tostring(tag) .. "] " .. tostring(msg)
+        table.insert(dump, line)
+        print(line)
     end
 
-    -- Also set common key attribute on LocalPlayer
-    pcall(function()
-        local Players = game:GetService("Players")
-        local lp = Players.LocalPlayer
-        if lp then
-            for _, name in ipairs(keyNames) do
-                pcall(function() lp:SetAttribute(name, FAKE_KEY) end)
-            end
-        end
-    end)
-
-    -- ============================================================
-    -- HTTP HOOK — intercept key-verification URLs
-    -- ============================================================
-    -- Many key systems call game:HttpGet(url) to verify the key.
-    -- We return "true" / "valid" / success JSON for any URL that looks like a key check.
-    local originalHttpGet = game.HttpGet
-    local originalRequest = request or http_request or (syn and syn.request)
-    local originalHttpGetAsync = game.HttpGetAsync
-
-    local KEY_URL_PATTERNS = {
-        "key", "Key", "KEY",
-        "verify", "Verify",
-        "auth", "Auth",
-        "license", "License",
-        "validate", "Validate",
-        "check", "Check",
-        "whitelist", "Whitelist",
-        "premium", "Premium",
-        "luarmor", "linkvertise", "lootlab",
-        "workink", "flux", "gateway",
-        "discord.com/api/webhooks",  -- some scripts phone home
-    }
-
-    local function isKeyUrl(url)
-        if type(url) ~= "string" then return false end
-        for _, pat in ipairs(KEY_URL_PATTERNS) do
-            if url:find(pat, 1, true) then return true end
-        end
+    local function isInteresting(s)
+        if type(s) ~= "string" then return false end
+        if #s < 4 or #s > 200 then return false end
+        -- Filter out obviously non-key strings
+        if s:match("^[%s%p]*$") then return false end
+        -- Keep anything that looks key-like: alphanumeric with dashes, mixed case, hex, base64
+        if s:match("[A-Za-z0-9%-_]{8,}") then return true end
         return false
     end
 
-    local function fakeKeyResponse()
-        -- Return a response that satisfies common key check formats
-        local responses = {
-            "valid",
-            "true",
-            '{"valid":true,"status":"ok","success":true}',
-            '{"success":true,"valid":true,"message":"Key verified"}',
-            "Key Verified",
-            "OK",
-            "1",
-        }
-        return responses[math.random(1, #responses)]
+    local seen = {}
+    local function capture(s, ctx)
+        if not isInteresting(s) then return end
+        local key = ctx .. "::" .. s
+        if not seen[key] then
+            seen[key] = true
+            log(ctx, s)
+        end
     end
 
-    -- Hook game:HttpGet
-    pcall(function()
-        local oldGet = game.HttpGet
-        local mt = getrawmetatable(game)
-        setreadonly(mt, false)
-        mt.__index = mt.__index -- safety
-        -- Use hookfunction if available (most executors have it)
-        if hookfunction then
+    -- ============================================================
+    -- HOOK STRING LIBRARY — every string op gets logged
+    -- ============================================================
+    local rawString = {
+        find = string.find,
+        gmatch = string.gmatch,
+        gsub = string.gsub,
+        match = string.match,
+        sub = string.sub,
+        format = string.format,
+        len = string.len,
+        lower = string.lower,
+        upper = string.upper,
+        rep = string.rep,
+        reverse = string.reverse,
+        byte = string.byte,
+        char = string.char,
+    }
+
+    if hookfunction then
+        pcall(function()
+            hookfunction(string.find, function(s, pattern, ...)
+                capture(s, "STR.find.s")
+                capture(pattern, "STR.find.pat")
+                return rawString.find(s, pattern, ...)
+            end)
+        end)
+        pcall(function()
+            hookfunction(string.match, function(s, pattern, ...)
+                capture(s, "STR.match.s")
+                capture(pattern, "STR.match.pat")
+                return rawString.match(s, pattern, ...)
+            end)
+        end)
+        pcall(function()
+            hookfunction(string.gmatch, function(s, pattern, ...)
+                capture(s, "STR.gmatch.s")
+                capture(pattern, "STR.gmatch.pat")
+                return rawString.gmatch(s, pattern, ...)
+            end)
+        end)
+        pcall(function()
+            hookfunction(string.gsub, function(s, pattern, repl, ...)
+                capture(s, "STR.gsub.s")
+                capture(pattern, "STR.gsub.pat")
+                capture(repl, "STR.gsub.repl")
+                return rawString.gsub(s, pattern, repl, ...)
+            end)
+        end)
+        pcall(function()
+            hookfunction(string.sub, function(s, i, j)
+                local r = rawString.sub(s, i, j)
+                if r and #r >= 4 and #r <= 100 then
+                    capture(r, "STR.sub")
+                end
+                return r
+            end)
+        end)
+        pcall(function()
+            hookfunction(string.format, function(fmt, ...)
+                capture(fmt, "STR.format")
+                local args = {...}
+                for i, a in ipairs(args) do
+                    if type(a) == "string" then capture(a, "STR.format.arg" .. i) end
+                end
+                return rawString.format(fmt, ...)
+            end)
+        end)
+        pcall(function()
+            hookfunction(string.lower, function(s)
+                capture(s, "STR.lower")
+                return rawString.lower(s)
+            end)
+        end)
+        pcall(function()
+            hookfunction(string.upper, function(s)
+                capture(s, "STR.upper")
+                return rawString.upper(s)
+            end)
+        end)
+    end
+
+    -- ============================================================
+    -- HOOK HTTP — log every URL + response body
+    -- ============================================================
+    if hookfunction then
+        pcall(function()
             local old
             old = hookfunction(game.HttpGet, function(self, url, ...)
-                if isKeyUrl(url) then
-                    return fakeKeyResponse()
+                capture(url, "HTTP.Get.url")
+                local body = old(self, url, ...)
+                if type(body) == "string" then
+                    capture(body:sub(1, 500), "HTTP.Get.resp")
                 end
+                return body
+            end)
+        end)
+        pcall(function()
+            local old
+            old = hookfunction(game.HttpGetAsync, function(self, url, ...)
+                capture(url, "HTTP.GetAsync.url")
                 return old(self, url, ...)
             end)
-        end
-        setreadonly(mt, true)
-    end)
+        end)
+    end
 
-    -- Hook global request() / http_request for key URLs
+    -- Hook request() globally
     pcall(function()
-        if originalRequest and hookfunction then
-            local old = originalRequest
+        local orig = request or http_request
+        if orig and hookfunction then
+            local old = orig
             local hooked = function(args)
                 args = args or {}
-                if isKeyUrl(args.Url) then
-                    return {
-                        StatusCode = 200,
-                        StatusMessage = "OK",
-                        Body = fakeKeyResponse(),
-                        Headers = {},
-                        Success = true,
-                    }
+                capture(args.Url or "", "REQ.url")
+                capture(args.Body or "", "REQ.body")
+                capture(args.Method or "", "REQ.method")
+                local resp = old(args)
+                if resp and type(resp.Body) == "string" then
+                    capture(resp.Body:sub(1, 500), "REQ.resp")
                 end
-                return old(args)
+                return resp
             end
-            -- Set hooked in multiple globals
             pcall(function() request = hooked end)
             pcall(function() http_request = hooked end)
             if syn then pcall(function() syn.request = hooked end) end
         end
     end)
 
-    -- Hook game:HttpGetAsync too
+    -- ============================================================
+    -- HOOK REMOTES — log every FireServer / InvokeServer call
+    -- ============================================================
     pcall(function()
-        if hookfunction then
-            local old
-            old = hookfunction(game.HttpGetAsync, function(self, url, ...)
-                if isKeyUrl(url) then
-                    return fakeKeyResponse()
+        local mt = getrawmetatable(game)
+        setreadonly(mt, false)
+
+        local oldIndex = mt.__index
+        mt.__index = newcclosure and newcclosure(function(self, k)
+            return oldIndex(self, k)
+        end) or oldIndex
+
+        -- Hook RemoteEvent.FireServer via instance method
+        local function hookRemote(instance)
+            if not instance then return end
+            if instance:IsA("RemoteEvent") then
+                local oldFire = instance.FireServer
+                if hookfunction then
+                    pcall(function()
+                        hookfunction(oldFire, function(self, ...)
+                            local args = {...}
+                            for i, a in ipairs(args) do
+                                if type(a) == "string" then
+                                    capture(a, "REMOTE.Fire." .. instance.Name .. ".arg" .. i)
+                                end
+                            end
+                            return oldFire(self, ...)
+                        end)
+                    end)
                 end
-                return old(self, url, ...)
+            elseif instance:IsA("RemoteFunction") then
+                local oldInvoke = instance.InvokeServer
+                if hookfunction then
+                    pcall(function()
+                        hookfunction(oldInvoke, function(self, ...)
+                            local args = {...}
+                            for i, a in ipairs(args) do
+                                if type(a) == "string" then
+                                    capture(a, "REMOTE.Invoke." .. instance.Name .. ".arg" .. i)
+                                end
+                            end
+                            return oldInvoke(self, ...)
+                        end)
+                    end)
+                end
+            end
+        end
+
+        -- Walk ReplicatedStorage for remotes
+        task.spawn(function()
+            for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
+                pcall(hookRemote, obj)
+            end
+            ReplicatedStorage.DescendantAdded:Connect(function(obj)
+                pcall(hookRemote, obj)
+            end)
+        end)
+
+        setreadonly(mt, true)
+    end)
+
+    -- ============================================================
+    -- HOOK print / warn — see what the script complains about
+    -- ============================================================
+    pcall(function()
+        local oldPrint = print
+        if hookfunction then
+            hookfunction(print, function(...)
+                local args = {...}
+                for _, a in ipairs(args) do
+                    if type(a) == "string" then capture(a, "PRINT") end
+                end
+                return oldPrint(...)
+            end)
+            hookfunction(warn, function(...)
+                local args = {...}
+                for _, a in ipairs(args) do
+                    if type(a) == "string" then capture(a, "WARN") end
+                end
             end)
         end
     end)
 
     -- ============================================================
-    -- HOOK LOADSTRING — skip nested key check loaders
-    -- ============================================================
-    -- Some scripts loadstring() a key-gate URL first; intercept those.
-    pcall(function()
-        if hookfunction and loadstring then
-            local oldLoad = loadstring
-            local hookedLoad = function(src, name)
-                -- If source is a URL fetch for key, return no-op function
-                if type(src) == "string" and src:find("HttpGet", 1, true) then
-                    -- Check if this is a key-fetch wrapper by inspecting the URL
-                    if isKeyUrl(src) then
-                        return function() end
-                    end
-                end
-                return oldLoad(src, name)
-            end
-            -- Don't override loadstring globally — too risky for legit uses
-            -- Only override _G.loadstring
-            -- pcall(function() _G.loadstring = hookedLoad end)
-        end
-    end)
-
-    -- ============================================================
-    -- MESSAGEINTERCEPT — auto-confirm any "Enter Key" UI dialog
+    -- HOOK TextBox.FocusLost — capture user input to key fields
     -- ============================================================
     pcall(function()
-        local Players = game:GetService("Players")
-        local lp = Players.LocalPlayer
         local PlayerGui = lp:WaitForChild("PlayerGui")
-        -- Watch for any ScreenGui named like "Key", "Auth", "License" and destroy it
         task.spawn(function()
-            while task.wait(1) do
+            while task.wait(0.5) do
                 pcall(function()
-                    for _, gui in ipairs(PlayerGui:GetChildren()) do
-                        if gui:IsA("ScreenGui") then
-                            local n = gui.Name:lower()
-                            if n:find("key") or n:find("auth") or n:find("license")
-                               or n:find("verify") or n:find("whitelist") then
-                                gui:Destroy()
+                    for _, gui in ipairs(PlayerGui:GetDescendants()) do
+                        if gui:IsA("TextBox") and not gui:GetAttribute("RynixHooked") then
+                            gui:SetAttribute("RynixHooked", true)
+                            local name = gui.Name
+                            local placeholder = gui.PlaceholderText or ""
+                            if name:lower():find("key") or placeholder:lower():find("key") then
+                                gui.FocusLost:Connect(function(enterPressed)
+                                    capture(gui.Text, "USER.input." .. name)
+                                end)
                             end
                         end
                     end
@@ -197,19 +274,36 @@ pcall(function()
     end)
 
     -- ============================================================
+    -- AUTO-DUMP after 60 seconds
+    -- ============================================================
+    task.spawn(function()
+        task.wait(60)
+        local out = table.concat(dump, "\n")
+        pcall(function()
+            if writefile then
+                writefile("RynixKeyDump.txt", out)
+                print("[RYNIX] Dump saved to workspace: RynixKeyDump.txt")
+            end
+        end)
+        print("[RYNIX] === KEY DUMP ===")
+        print(out)
+        print("[RYNIX] === END DUMP (" .. #dump .. " entries) ===")
+    end)
+
+    -- ============================================================
     -- LOAD TARGET SCRIPT
     -- ============================================================
     local url
     if game.PlaceId == 107778070777162 then
-        -- Steal An Egg
         url = "https://raw.githubusercontent.com/lomigg/rynix/main/RynixEgg.lua"
     elseif game.GameId == 10200395747 then
-        -- Grow A Garden 2
         url = "https://raw.githubusercontent.com/lomigg/rynix/main/RynixGaG2.lua"
     else
-        -- Blox Fruits (default)
         url = "https://raw.githubusercontent.com/lomigg/rynix/main/RynixBloxFruits.lua"
     end
 
+    print("[RYNIX] Loading target: " .. url)
+    print("[RYNIX] Hooks installed. Will dump in 60 seconds.")
+    print("[RYNIX] If a key prompt appears, TYPE ANYTHING and press enter — we'll capture what the script compares against.")
     loadstring(game:HttpGet(url))()
 end)
